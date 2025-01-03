@@ -1,85 +1,97 @@
-import yfinance as yf
+import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt 
-from pypfopt import risk_models, plotting, expected_returns, EfficientFrontier
-import streamlit as st 
-
-st.markdown("<h1 style='text-align: center;'>Portfolio Analyzer & ESG Score</h1>", unsafe_allow_html=True)
-
-st.sidebar.title("Add your Portfolio")
-option = st.sidebar.radio(
-    "Choose method", 
-    ["CSV", "Manually"],
-    captions=[
-        "Upload your portfolio as a CSV.",
-        "Enter it manually (recommended for smaller portfolios).",
-    ]
+from utils import (
+    fetch_price_data,
+    calculate_portfolio_metrics,
+    optimize_portfolio,
+    plot_covariance_matrix,
+    plot_efficient_frontier,
+    compare_portfolios,
 )
 
-upload = st.sidebar.container()
+st.markdown("<h1 style='text-align: center;'>Portfolio Optimizer & ESG Score</h1>", unsafe_allow_html=True)
+
+st.sidebar.title("Add Your Portfolio")
+option = st.sidebar.radio(
+    "Choose method", ["CSV", "Manually"],
+    captions=["Upload your portfolio as a CSV.", "Enter it manually."]
+)
+
+portfolio = pd.DataFrame()  # Ensure it's always defined
 
 if option == "CSV":
-    # CSV Upload
-    uploaded_file = upload.file_uploader("Upload your portfolio as a CSV file", type=["csv"])
-    if uploaded_file is not None:
+    uploaded_file = st.sidebar.file_uploader("Upload a CSV", type=["csv"])
+    if uploaded_file:
         try:
-            # Read the CSV file into a DataFrame
             portfolio = pd.read_csv(uploaded_file)
-            # Validate the CSV structure
-            required_columns = {"Ticker"}
-            missing_columns = required_columns - set(portfolio.columns)
-            
-            if missing_columns:
-                upload.error(f"Missing required columns: {', '.join(missing_columns)}")
+            if "Ticker" not in portfolio.columns:
+                st.error("CSV must contain a 'Ticker' column.")
             else:
-                # Display the uploaded portfolio
-                upload.success("Portfolio uploaded successfully!")
+                st.success("Portfolio uploaded!")
                 st.dataframe(portfolio)
         except Exception as e:
-            upload.error(f"Error reading the CSV file: {e}")
-else:
-    # Manual Entry
-    upload.empty()
+            st.error(f"Error reading CSV: {e}")
+
+else:  # Manual Entry
     portfolio = pd.DataFrame(columns=["Ticker"])
-
-    portfolio = upload.data_editor(
-        portfolio, 
-        use_container_width=True,
-        column_order=["Ticker"], 
-        column_config={
-            "Ticker": st.column_config.TextColumn("Stock Ticker"),
-        },
-        num_rows="dynamic",  # Allow dynamic number of rows
-        key="portfolio_data_editor"
-    )
-
-    # Add a submit button to trigger the portfolio analysis
-    submit_button = upload.button("Submit Portfolio")
-
-    # Validate input when the submit button is pressed
-    if submit_button:
-        invalid_rows = []
-
-        for idx, row in portfolio.iterrows():
-            ticker = row['Ticker']
-
-            # Check if the ticker is empty
-            if not ticker.strip():
-                invalid_rows.append(f"Row {idx+1}: Ticker is empty. Please enter a valid ticker.")
-
-            # Check if the ticker exists by trying to fetch data using yfinance
-            if ticker.strip():
-                try:
-                    stock_data = yf.Ticker(ticker).history(period="1d")
-                    if stock_data.empty:
-                        invalid_rows.append(f"Row {idx+1}: No data found for ticker '{ticker}'. Please enter a valid ticker.")
-                except Exception as e:
-                    invalid_rows.append(f"Row {idx+1}: Error fetching data for ticker '{ticker}': {e}")
-
-        # Display error messages if any validation fails
-        if invalid_rows:
-            for error in invalid_rows:
-                upload.error(error)
+    portfolio = st.data_editor(portfolio, use_container_width=True, num_rows="dynamic", key="portfolio_data_editor")
+    if st.sidebar.button("Submit"):
+        if portfolio.empty or portfolio['Ticker'].isnull().any():
+            st.error("Please enter valid stock tickers.")
         else:
-            upload.success("Portfolio is valid! Ready for analysis.")
+            st.success("Portfolio submitted.")
+
+if not portfolio.empty:
+    tickers = portfolio['Ticker'].tolist()
+    st.write(tickers)
+    
+    st.write("### Portfolio Analysis")
+    with st.spinner("Fetching stock data..."):
+        try:
+            prices = fetch_price_data(tickers)
+            st.write(prices.tail())
+
+            # Display historical prices
+            st.write("### Historical Prices")
+            st.line_chart(prices)
+
+            # Portfolio statistics
+            mu, S = calculate_portfolio_metrics(prices)
+
+            # ESG scores (placeholder)
+            esg_scores = np.round(np.random.uniform(0.1, 0.9, len(tickers)), 1)
+            min_esg_score = st.sidebar.slider("Minimum ESG Score", 0.3, 0.8, 0.6, 0.1)
+
+            # Optimize and display portfolio weights
+            weights, perf = optimize_portfolio(mu, S, esg_scores, min_esg_score)
+            st.write("### Portfolio Weights")
+            st.bar_chart(pd.DataFrame(weights, index=[0]).T)
+
+            # Display performance
+            st.write("### Portfolio Performance")
+            st.write(f"Expected Return: {perf[0]:.2%}")
+            st.write(f"Volatility: {perf[1]:.2%}")
+            st.write(f"Sharpe Ratio: {perf[2]:.2f}")
+
+            # Covariance matrix visualization
+            st.write("### Covariance Matrix")
+            fig = plot_covariance_matrix(prices)
+            st.pyplot(fig, use_container_width = True) 
+            # Efficient frontier visualization
+            st.write("### Efficient Frontier")
+            # st.write("works")
+
+            fig = plot_efficient_frontier(mu, S, esg_scores, min_esg_score=0.6)
+            # st.write("works")
+
+            st.pyplot(fig, use_container_width = True)
+            # Compare portfolios
+            st.write("### Portfolio Comparison")
+            comparison_df = compare_portfolios(mu, S, esg_scores)
+            st.dataframe(comparison_df)
+
+        except Exception as e:
+            st.error(f"Error during analysis: {e}")
+else:
+    st.info("Upload a portfolio to begin.")
