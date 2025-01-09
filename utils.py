@@ -24,21 +24,17 @@ import plotly.figure_factory as ff
 def plot_covariance_matrix(prices):
     sample_cov = risk_models.sample_cov(prices, frequency=252)
     st.write(sample_cov)
-    # fig, ax = plt.subplots(figsize=(10, 6))
-    # plotting.plot_covariance(sample_cov, plot_correlation=True, ax=ax)
-    # # st.plotly_chart(fig) 
-    # plt.close(fig) 
-    # return fig
-    fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Alternative visualization: Seaborn heatmap
-    sns.heatmap(sample_cov, cmap="viridis", annot=False, fmt=".2f", ax=ax)
-    ax.set_title("Covariance Matrix Heatmap")
-
-    # Prevent Matplotlib from displaying an empty global figure
-    plt.close(fig)
-
-    return fig  
+    fig = ff.create_annotated_heatmap(
+        z=sample_cov.values,
+        x=sample_cov.columns.tolist(),
+        y=sample_cov.index.tolist(),
+        colorscale="Viridis",
+        annotation_text=[["" for _ in range(len(sample_cov.columns))] for _ in range(len(sample_cov.index))],  # Removes numbers
+        showscale=True
+    )
+    fig.update_layout(title="Covariance Matrix Heatmap")
+    return fig
 
 from copy import deepcopy
 
@@ -61,8 +57,6 @@ def optimize_portfolio(mu, S, esg_scores, min_esg_score=0.6):
     ef.max_sharpe()  # Solves the optimization problem
     weights_no_esg = ef.clean_weights()
     perf_no_esg = ef.portfolio_performance()
-    st.write("works")
-
 
     # Step 2: Optimize ESG-constrained portfolio **with a fresh instance**
     ef_esg = EfficientFrontier(mu, S)  # New instance
@@ -70,8 +64,6 @@ def optimize_portfolio(mu, S, esg_scores, min_esg_score=0.6):
     ef_esg.max_sharpe()  # Solve optimization again
     weights_esg = ef_esg.clean_weights()
     perf_esg = ef_esg.portfolio_performance()
-    st.write("works")
-
     return weights_esg, perf_esg 
 
 
@@ -87,26 +79,43 @@ import streamlit as st
 
 import plotly.graph_objects as go
 
-def plot_efficient_frontier(mu, S, esg_scores, min_esg_score=0.6):
-    ef = EfficientFrontier(mu, S, weight_bounds = (0,1))
-    fig, ax = plt.subplots()
-    ef_max_sharpe = ef.deepcopy()
-    plotting.plot_efficient_frontier(ef, ax=ax, show_assets=True)
 
-    # Find the tangency portfolio
+def plot_efficient_frontier(mu, S, esg_scores, min_esg_score=0.6):
+    ef = EfficientFrontier(mu, S, weight_bounds=(0, 1))
+    fig, ax = plt.subplots()
+
+    # ✅ No ESG Constraint (Default Efficient Frontier)
+    ef_max_sharpe = ef.deepcopy()
+    plotting.plot_efficient_frontier(ef, ax=ax, show_assets=True, linecolor="blue")
+
+    # ✅ Max Sharpe Portfolio (Tangency Portfolio)
     ef_max_sharpe.max_sharpe()
     ret_tangent, std_tangent, _ = ef_max_sharpe.portfolio_performance()
-    ax.scatter(std_tangent, ret_tangent, marker="*", s=100, c="r", label="Max Sharpe")
+    max_sharpe_point = ax.scatter(
+        std_tangent, ret_tangent, 
+        marker="*", s=150, c="red", label="Max Sharpe Portfolio"
+    )
 
+    # ✅ Aggressive ESG Constraint (≥ 0.8)
     ef_esg_aggressive = EfficientFrontier(mu, S)
     portfolio_min_score = 0.8
     ef_esg_aggressive.add_constraint(lambda w: esg_scores @ w >= portfolio_min_score)
-    plotting.plot_efficient_frontier(ef_esg_aggressive, ax=ax, show_assets=False)
+    plotting.plot_efficient_frontier(ef_esg_aggressive, ax=ax, show_assets=False, linecolor="green")
 
+    # ✅ Mild ESG Constraint (≥ 0.6)
     ef_esg_mild = EfficientFrontier(mu, S)
     portfolio_min_score = 0.6
     ef_esg_mild.add_constraint(lambda w: esg_scores @ w >= portfolio_min_score)
-    plotting.plot_efficient_frontier(ef_esg_mild, ax=ax, show_assets=False)
+    plotting.plot_efficient_frontier(ef_esg_mild, ax=ax, show_assets=False, linecolor="orange")
+
+    # ✅ Legend Fix - Include All Elements (Including Individual Assets)
+    handles, labels = ax.get_legend_handles_labels()
+    
+    # Add the Max Sharpe Portfolio explicitly
+    handles.append(max_sharpe_point)
+    labels.append("Max Sharpe Portfolio")
+
+    ax.legend(handles=handles, labels=labels, loc="upper left", fontsize=10)
 
     plt.close(fig)
     return fig
